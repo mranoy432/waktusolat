@@ -6,11 +6,13 @@
     <title>Waktu Solat Malaysia</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tone.js CDN untuk menjana bunyi -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
     <style>
         /* Gaya tersuai untuk imej latar belakang dan transisi */
         body {
             font-family: 'Inter', sans-serif;
-            transition: background-image 0.5s ease-in-out, background-color 0.5s ease-in-out;
+            transition: background-image 0.5s ease-in, background-color 0.5s ease-in;
             background-size: cover; /* Pastikan gambar muat secara automatik */
             background-position: center; /* Pusatkan gambar */
             background-repeat: no-repeat; /* Elakkan gambar berulang */
@@ -196,6 +198,52 @@
         const PRAYER_TIMES_API_BASE_URL = 'https://solatapi.fajarhac.com/v2/times'; // Untuk waktu solat sebenar
 
         let allZones = []; // Untuk menyimpan semua zon yang diambil dari API
+        let bellSynth; // Objek Tone.js Synth
+        let scheduledTimers = []; // Untuk menyimpan ID setTimeout notifikasi
+
+        // Inisialisasi Tone.js synth apabila halaman dimuat dan pengguna berinteraksi
+        // Ini mengatasi batasan pelayar yang memerlukan interaksi pengguna untuk memulakan konteks audio
+        document.documentElement.addEventListener('mousedown', () => {
+            if (Tone.context.state !== 'running') {
+                Tone.start();
+                console.log('Konteks Audio Dimulakan');
+            }
+            if (!bellSynth) {
+                bellSynth = new Tone.Synth({
+                    oscillator: {
+                        type: "sine" // Jenis gelombang untuk bunyi loceng
+                    },
+                    envelope: {
+                        attack: 0.005, // Masa serangan
+                        decay: 0.1,   // Masa pereputan
+                        sustain: 0.05, // Tahap pengekalan
+                        release: 0.5  // Masa pelepasan
+                    }
+                }).toDestination(); // Sambungkan synth ke output audio utama
+                console.log('Bell Synth Diinisialisasi');
+            }
+        }, { once: true }); // Pendengar acara ini hanya akan berjalan sekali
+
+        /**
+         * Memainkan bunyi loceng ringkas.
+         */
+        function playBellSound() {
+            if (bellSynth) {
+                bellSynth.triggerAttackRelease("C5", "0.5"); // Mainkan nada C5 selama 0.5 saat
+                console.log('Bunyi loceng dimainkan.');
+            } else {
+                console.warn("Bell synth belum diinisialisasi. Klik di mana-mana pada halaman untuk membolehkan audio.");
+            }
+        }
+
+        /**
+         * Membersihkan semua notifikasi bunyi yang dijadualkan.
+         */
+        function clearScheduledNotifications() {
+            scheduledTimers.forEach(timerId => clearTimeout(timerId));
+            scheduledTimers = []; // Kosongkan tatasusunan
+            console.log('Semua notifikasi bunyi yang dijadualkan telah dibersihkan.');
+        }
 
         /**
          * Mengambil semua zon solat dari API waktusolat.app.
@@ -393,22 +441,26 @@
         }
 
         /**
-         * Memaparkan waktu solat sebenar yang diambil pada halaman.
+         * Memaparkan waktu solat sebenar yang diambil pada halaman dan menjadualkan notifikasi bunyi.
          * @param {object} prayerTimes - Objek data waktu solat untuk hari ini.
          * @param {string} [hijriDateFromApi] - String tarikh Hijrah pilihan dari API jika tersedia.
          */
         function displayActualPrayerTimes(prayerTimes, hijriDateFromApi) {
+            clearScheduledNotifications(); // Bersihkan notifikasi sebelumnya
+
             const prayerMapping = {
                 imsak: { label: 'Imsak', key: 'imsak' },
                 fajr: { label: 'Subuh', key: 'subuh' }, // Petakan 'fajr' kepada 'subuh' dari API
                 syuruk: { label: 'Syuruk', key: 'syuruk' },
                 dhuhr: { label: 'Zohor', key: 'zohor' },
-                asr: { label: 'Asar', key: 'asar' },
+                asar: { label: 'Asar', key: 'asar' },
                 maghrib: { label: 'Maghrib', key: 'maghrib' },
                 isha: { label: 'Isyak', key: 'isyak' } // Petakan 'isha' kepada 'isyak' dari API
             };
 
             prayerTimesDisplay.innerHTML = ''; // Kosongkan kandungan sebelumnya
+
+            const now = new Date();
 
             // Ulangi waktu solat yang dikehendaki
             for (const internalKey in prayerMapping) {
@@ -425,6 +477,19 @@
                         <span id="${internalKey}-time" class="text-xl font-bold">${time}</span>
                     `;
                     prayerTimesDisplay.appendChild(div);
+
+                    // Jadualkan notifikasi bunyi jika waktu solat belum berlalu
+                    const timeToPrayer = date.getTime() - now.getTime();
+                    if (timeToPrayer > 0) {
+                        console.log(`Menjadualkan notifikasi untuk ${label} dalam ${Math.round(timeToPrayer / 1000 / 60)} minit.`);
+                        scheduledTimers.push(setTimeout(() => {
+                            playBellSound();
+                            // Anda boleh menambah notifikasi visual di sini juga
+                        }, timeToPrayer));
+                    } else {
+                        console.log(`Waktu ${label} (${time}) telah berlalu.`);
+                    }
+
                 } else {
                     console.warn(`Waktu ${label} tidak tersedia dalam data API untuk kunci ${api_key}.`);
                     const div = document.createElement('div');
@@ -450,7 +515,7 @@
                     year: 'numeric',
                     calendar: 'islamic-umalqura'
                 });
-                hijriDateEl.textContent = `Hijrah: ${hijriFormatter.format(today)} (Anggaran)`;
+                hijriDateEl.textContent = `Hijrah: ${hijriFormatter.format(today)}`;
                 console.warn('Tarikh Hijrah tidak tersedia dalam data API, menggunakan anggaran klien.');
             }
         }
